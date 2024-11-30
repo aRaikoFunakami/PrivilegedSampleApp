@@ -1,70 +1,142 @@
 package com.example.privilegedsampleapp
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import android.widget.TextView
 import android.widget.NumberPicker
-
 import android.os.Handler
 import android.os.Looper
 import android.car.Car
 import android.car.VehiclePropertyIds
 import android.car.hardware.property.CarPropertyManager
+import android.car.hardware.property.CarPropertyManager.CarPropertyEventCallback
+import android.car.hardware.CarPropertyValue
 import android.util.Log
-import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private lateinit var car: Car
     private lateinit var carPropertyManager: CarPropertyManager
+    private lateinit var numberPicker: NumberPicker // NumberPickerをプロパティとして保持
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // NumberPicker and TextView
-        val numberPicker = findViewById<NumberPicker>(R.id.numberPicker) ?: return
-        val selectedNumberText = findViewById<TextView>(R.id.selectedNumberText) ?: return
+        // NumberPicker init
+        numberPicker = findViewById<NumberPicker>(R.id.numberPicker) ?: return
 
-        // NumberPicker
         numberPicker.minValue = 16
         numberPicker.maxValue = 32
-        numberPicker.value = 22
-        selectedNumberText.text = String.format(Locale.getDefault(), "Selected Number: %d", numberPicker.value)
+        numberPicker.value = getTemperature().toInt()
 
-        // CarProperty
+        // CarProperty init
         val handler = Handler(Looper.getMainLooper())
         car = Car.createCar(this, handler)
         carPropertyManager = car.getCarManager(Car.PROPERTY_SERVICE) as CarPropertyManager
 
-        // get the value of the right set temperature and display it in TextView.
-        // it needs privilege: CONTROL_CAR_CLIMATE
-        // mAreaId=0x44 : Temperature setting display on the right
-        // mAreaId=0x31 : Temperature setting display on the left
-        try {
-            val targetTemp: Float = carPropertyManager.getFloatProperty(VehiclePropertyIds.HVAC_TEMPERATURE_SET, 0x44)
-            Log.d("getFloatProperty HVAC_TEMPERATURE_SET: ", targetTemp.toString())
-            numberPicker.value = targetTemp.toInt()
-            selectedNumberText.text = String.format(Locale.getDefault(), "Selected Number: %d", numberPicker.value)
-        } catch (e: SecurityException) {
-            Log.e("CarProperty", "Permission denied for HVAC_TEMPERATURE_SET: ${e.message}")
-        } catch (e: IllegalArgumentException) {
-            Log.e("CarProperty", "Invalid property ID or area ID for HVAC_TEMPERATURE_SET: ${e.message}")
+        // Register CarPropertyManager listener
+        carPropertyManager.registerCallback(
+            carPropertyEventCallback,
+            VehiclePropertyIds.HVAC_TEMPERATURE_SET,
+            CarPropertyManager.SENSOR_RATE_ONCHANGE
+        )
+
+        // NumberPicker listener
+        numberPicker.setOnValueChangedListener { _, _, newVal ->
+            setTemperature(newVal.toFloat())
         }
 
-        // NumberPicker
-        numberPicker.apply {
-            setOnValueChangedListener { _, _, newVal ->
-                selectedNumberText.text = String.format(Locale.getDefault(), "Selected Number: %d", newVal)
-                try {
-                    // set a temperature value to right and left
-                    carPropertyManager.setFloatProperty(VehiclePropertyIds.HVAC_TEMPERATURE_SET, 0x44, newVal.toFloat())
-                    carPropertyManager.setFloatProperty(VehiclePropertyIds.HVAC_TEMPERATURE_SET, 0x31, newVal.toFloat())
-                    Log.d("setFloatProperty HVAC_TEMPERATURE_SET", "Value successfully set to: $newVal")
-                } catch (e: SecurityException) {
-                    Log.e("CarProperty", "Permission denied for setting HVAC_TEMPERATURE_SET: ${e.message}")
-                } catch (e: IllegalArgumentException) {
-                    Log.e("CarProperty", "Invalid property ID or area ID for setting HVAC_TEMPERATURE_SET: ${e.message}")
+        // BroadcastReceiverの登録
+        val intentFilter = IntentFilter().apply {
+            addAction("com.example.privilegedsampleapp.ACTION_GET_TEMPERATURE")
+            addAction("com.example.privilegedsampleapp.ACTION_SET_TEMPERATURE")
+        }
+        registerReceiver(temperatureReceiver, intentFilter, Context.RECEIVER_EXPORTED)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        unregisterReceiver(temperatureReceiver)
+        carPropertyManager.unregisterCallback(carPropertyEventCallback)
+    }
+
+    private val temperatureReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            intent ?: return
+            when (intent.action) {
+                "com.example.privilegedsampleapp.ACTION_GET_TEMPERATURE" -> {
+                    val targetTemp = getTemperature()
+                    val resultIntent = Intent("com.example.privilegedsampleapp.RESULT_TEMPERATURE")
+                    resultIntent.putExtra("RESULT_VALUE", targetTemp)
+                    Log.d("MainActivity", "RESULT_VALUE: $targetTemp")
+                    sendBroadcast(resultIntent)
                 }
+                "com.example.privilegedsampleapp.ACTION_SET_TEMPERATURE" -> {
+                    val newValue = intent.getFloatExtra("EXTRA_VALUE", -1f)
+                    if (newValue in 16f..32f) {
+                        setTemperature(newValue)
+                        Log.d("MainActivity", "Temperature value: $newValue")
+                        updateNumberPickerValue(newValue.toInt()) // NumberPickerの値を更新
+                    } else {
+                        Log.e("MainActivity", "Invalid temperature value: $newValue")
+                    }
+                }
+                else -> Log.e("MainActivity", "Unknown action: ${intent.action}")
+            }
+        }
+    }
+
+    private fun getTemperature(): Float {
+        return try {
+            carPropertyManager.getFloatProperty(VehiclePropertyIds.HVAC_TEMPERATURE_SET, 0x44).also {
+                Log.d("MainActivity", "Temperature retrieved: $it")
+            }
+        } catch (e: Exception) {
+            Log.e("CarProperty", "Error retrieving temperature: ${e.message}")
+            -1f // Invalid value
+        }
+    }
+
+    private fun setTemperature(value: Float) {
+        try {
+            // right temperature
+            carPropertyManager.setFloatProperty(VehiclePropertyIds.HVAC_TEMPERATURE_SET, 0x44, value)
+            // left temperature
+            // carPropertyManager.setFloatProperty(VehiclePropertyIds.HVAC_TEMPERATURE_SET, 0x31, value)
+            Log.d("MainActivity", "Temperature set to: $value")
+        } catch (e: Exception) {
+            Log.e("CarProperty", "Error setting temperature: ${e.message}")
+        }
+    }
+
+    // NumberPicker
+    private fun updateNumberPickerValue(value: Int) {
+        runOnUiThread {
+            if (value in numberPicker.minValue..numberPicker.maxValue) {
+                numberPicker.value = value
+            } else {
+                Log.e("MainActivity", "Value $value out of NumberPicker range")
+            }
+        }
+    }
+
+    // CarPropertyManager listeners
+    private val carPropertyEventCallback = object : CarPropertyEventCallback {
+        // Update the value of the NumberPicker when the interior temperature setting is changed.
+        override fun onChangeEvent(event: CarPropertyValue<*>) {
+            if (event.propertyId == VehiclePropertyIds.HVAC_TEMPERATURE_SET) {
+                val newValue = event.value as Float
+                Log.d("MainActivity", "HVAC_TEMPERATURE_SET changed: $newValue")
+                updateNumberPickerValue(newValue.toInt()) // NumberPickerの値を更新
+            }
+        }
+
+        override fun onErrorEvent(propertyId: Int, zone: Int) {
+            if (propertyId == VehiclePropertyIds.HVAC_TEMPERATURE_SET) {
+                Log.e("MainActivity", "Error occurred in HVAC_TEMPERATURE_SET property.")
             }
         }
     }

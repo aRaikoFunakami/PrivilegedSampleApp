@@ -10,13 +10,7 @@
         android:id="@+id/numberPicker"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp" />
-
-    <TextView
-        android:id="@+id/selectedNumberText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Selected Number: 0"
-        android:textSize="18sp"
-        android:textStyle="bold" />
+        android:layout_marginBottom="128dp"
+        android:scaleX="3"
+        android:scaleY="3"/>
 </LinearLayout>
