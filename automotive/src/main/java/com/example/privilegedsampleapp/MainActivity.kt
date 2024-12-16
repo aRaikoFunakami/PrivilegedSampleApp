@@ -70,12 +70,12 @@ class MainActivity : ComponentActivity() {
                 "com.example.privilegedsampleapp.ACTION_GET_TEMPERATURE" -> {
                     val targetTemp = getTemperature()
                     val resultIntent = Intent("com.example.privilegedsampleapp.RESULT_TEMPERATURE")
-                    resultIntent.putExtra("RESULT_VALUE", targetTemp)
-                    Log.d("MainActivity", "RESULT_VALUE: $targetTemp")
+                    resultIntent.putExtra("TEMPERATURE_VALUE", targetTemp)
+                    Log.d("MainActivity", "TEMPERATURE_VALUE: $targetTemp")
                     sendBroadcast(resultIntent)
                 }
                 "com.example.privilegedsampleapp.ACTION_SET_TEMPERATURE" -> {
-                    val newValue = intent.getFloatExtra("EXTRA_VALUE", -1f)
+                    val newValue = intent.getFloatExtra("TEMPERATURE_VALUE", -1f)
                     if (newValue in 16f..32f) {
                         setTemperature(newValue)
                         Log.d("MainActivity", "Temperature value: $newValue")
@@ -131,6 +131,12 @@ class MainActivity : ComponentActivity() {
                 val newValue = event.value as Float
                 Log.d("MainActivity", "HVAC_TEMPERATURE_SET changed: $newValue")
                 updateNumberPickerValue(newValue.toInt()) // NumberPickerの値を更新
+
+                // Broadcast the temperature to Apps
+                val resultIntent = Intent("com.example.privilegedsampleapp.TEMPERATURE_VALUE")
+                resultIntent.putExtra("TEMPERATURE_VALUE", newValue)
+                Log.d("MainActivity", "Broadcasting TEMPERATURE_VALUE with RESULT_VALUE: $newValue")
+                sendBroadcast(resultIntent)
             }
         }
 
